@@ -25,20 +25,20 @@ enum Token {
  * chip
  */
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Instruction {
     name: String,
     inputs: Vec<String>,
     output: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Cross {
     name: String,
     size: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Chip {
     name: String,
     inputs: Vec<Cross>,
@@ -248,6 +248,7 @@ fn parse_chip(tokens: &mut Vec<Token>) -> Result<Chip, String> {
                     Ok(c) => { cross.push(c); }
                     Err(e) => { return Err(e); }
                 }
+                let cur: Token = tokens.pop().unwrap();
                 match match_token(&cur, Token::Semicolon(LOC_FILL)) {
                     Ok(_) => {}
                     Err(e) => { return Err(e); }
@@ -283,7 +284,7 @@ fn parse(mut tokens: Vec<Token>) -> Result<Chip, String> {
     }
 }
 
-fn exec(name: String, chips: Vec<Chip>, ins: Vec<u8>) -> Vec<u8> {
+fn exec(name: String, chips: &Vec<Chip>, ins: Vec<u8>) -> Vec<u8> {
     if name == String::from("nand") {
         if ins.len() != 2 {
             panic!("[Error] => tried to call nand with bad number of parameters");
@@ -294,18 +295,52 @@ fn exec(name: String, chips: Vec<Chip>, ins: Vec<u8>) -> Vec<u8> {
         out = (!out) & 0x1;
         return vec![out];
     }
-    let out: Vec<u8> = Vec::new();
-    let tmp: Option<Chip> = chips.into_iter().find(|c| c.name == name);
+    let mut out: Vec<u8> = Vec::new();
+    let mut crs: Vec<u8> = Vec::new();
+    let tmp: Option<&Chip> = chips.into_iter().find(|c| c.name == name);
     let me: Chip;
     match tmp {
-        Ok(c) => { me = c; }
-        Err(e) => { panic!("[ERROR] => unable to "); }
+        Some(c) => { me = (*c).clone(); }
+        None => { panic!("[ERROR] => unable to get chip : '{}'", name); }
+    }
+    assert!(ins.len() == me.inputs.len());
+    out.resize(me.output.len(), 0);
+    crs.resize(me.crosss.len(), 0);
+    for i in me.instr {
+        let mut iins: Vec<u8> = Vec::new();
+        for inp in i.inputs {
+            let tmp: Option<(usize, Cross)> = me.inputs.clone().into_iter().enumerate().find(|c| c.1.name == inp);
+            match tmp {
+                Some(c) => { iins.push(ins[c.0]); }
+                None => {
+                    let tmp: Option<(usize, Cross)> = me.crosss.clone().into_iter().enumerate().find(|c| c.1.name == inp);
+                    match tmp {
+                        Some(c) => { iins.push(crs[c.0]); }
+                        None => { panic!("[ERROR] => unable to get input {} for chip {}", inp, me.name); }
+                    }
+                }
+            }
+        }
+        let t = exec(i.name.clone(), chips, iins);
+        for oup in i.output.into_iter().enumerate() {
+            let tmp: Option<(usize, Cross)> = me.output.clone().into_iter().enumerate().find(|c| c.1.name == oup.1);
+            match tmp {
+                Some(c) => { out[c.0] = t[oup.0]; }
+                None => {
+                    let tmp: Option<(usize, Cross)> = me.crosss.clone().into_iter().enumerate().find(|c| c.1.name == oup.1);
+                    match tmp {
+                        Some(c) => { crs[c.0] = t[oup.0]; }
+                        None => { panic!("[ERROR] => unable to get input {} for chip {}", oup.1, me.name); }
+                    }
+                }
+            }
+        }
     }
     return out;
 }
 
 fn main() {
-    let mut toks: Vec<Token> = vec![
+    let mut toks_not: Vec<Token> = vec![
         Token::ChipKeyword(Location {file: "main.chp", line: 0, col: 0}),
         Token::Identifier(Location {file: "main.chp", line: 1, col: 0}, String::from("not")),
         Token::ParentesisOpen(Location {file: "main.chp", line: 2, col: 0}),
@@ -329,15 +364,65 @@ fn main() {
         Token::Semicolon(Location {file: "main.chp", line: 24, col: 0}),
         Token::BracketClose(Location {file: "main.chp", line: 22, col: 0}),
     ];
-    toks.reverse();
-    let chip: Chip;
-    match parse(toks) {
+    let mut toks_and: Vec<Token> = vec![
+        Token::ChipKeyword(Location {file: "main.chp", line: 0, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 1, col: 0}, String::from("and")),
+        Token::ParentesisOpen(Location {file: "main.chp", line: 2, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 3, col: 0}, String::from("A")),
+        Token::Colon(Location {file: "main.chp", line: 4, col: 0}),
+        Token::Integer(Location {file: "main.chp", line: 5, col: 0}, 1),
+        Token::Coma(Location {file: "main.chp", line: 123, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 3, col: 0}, String::from("B")),
+        Token::Colon(Location {file: "main.chp", line: 4, col: 0}),
+        Token::Integer(Location {file: "main.chp", line: 5, col: 0}, 1),
+        Token::ParentesisClose(Location {file: "main.chp", line: 10, col: 0}),
+        Token::ReturnOperator(Location {file: "main.chp", line: 11, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 12, col: 0}, String::from("Z")),
+        Token::Colon(Location {file: "main.chp", line: 13, col: 0}),
+        Token::Integer(Location {file: "main.chp", line: 14, col: 0}, 1),
+        Token::BracketOpen(Location {file: "main.chp", line: 15, col: 0}),
+        Token::CrossKeyword(Location {file: "main.chp", line: 15, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 15, col: 0}, String::from("X")),
+        Token::Colon(Location {file: "main.chp", line: 4, col: 0}),
+        Token::Integer(Location {file: "main.chp", line: 5, col: 0}, 1),
+        Token::Semicolon(Location {file: "main.chp", line: 4, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 16, col: 0}, String::from("nand")),
+        Token::ParentesisOpen(Location {file: "main.chp", line: 17, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 18, col: 0}, String::from("A")),
+        Token::Coma(Location {file: "main.chp", line: 19, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 20, col: 0}, String::from("B")),
+        Token::ParentesisClose(Location {file: "main.chp", line: 21, col: 0}),
+        Token::ReturnOperator(Location {file: "main.chp", line: 22, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 23, col: 0}, String::from("X")),
+        Token::Semicolon(Location {file: "main.chp", line: 24, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 16, col: 0}, String::from("not")),
+        Token::ParentesisOpen(Location {file: "main.chp", line: 17, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 18, col: 0}, String::from("X")),
+        Token::ParentesisClose(Location {file: "main.chp", line: 21, col: 0}),
+        Token::ReturnOperator(Location {file: "main.chp", line: 22, col: 0}),
+        Token::Identifier(Location {file: "main.chp", line: 23, col: 0}, String::from("Z")),
+        Token::Semicolon(Location {file: "main.chp", line: 24, col: 0}),
+        Token::BracketClose(Location {file: "main.chp", line: 22, col: 0}),
+    ];
+    toks_not.reverse();
+    toks_and.reverse();
+    let mut chip: Vec<Chip> = Vec::new();
+    match parse(toks_not) {
         Err(str) => {
             panic!("{}", str);
         }
         Ok(chp) => {
-            chip = chp;
+            chip.push(chp);
         }
     }
-    println!("{:?}", chip);
+    match parse(toks_and) {
+        Err(str) => {
+            panic!("{}", str);
+        }
+        Ok(chp) => {
+            chip.push(chp);
+        }
+    }
+    let out: Vec<u8> = exec(String::from("and"), &chip, vec![0, 0]);
+    println!("{:?}", out);
 }
